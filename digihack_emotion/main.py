@@ -101,8 +101,8 @@ def index(request: Request):
                     "example": {
                         "result_url": "/static/results/abc123_pred.png",
                         "detections": [
-                            {"label": "happy", "confidence": 0.95},
-                            {"label": "sad", "confidence": 0.89}
+                            {"label": "Happy", "confidence": 0.95},
+                            {"label": "Neutral", "confidence": 0.89}
                         ]
                     }
                 }
