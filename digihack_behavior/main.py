@@ -75,7 +75,7 @@ def index(request: Request):
 @app.post(
     '/predict_frame',
     response_model=PredictionResponse,
-    summary="Run YOLO detection on a base64-encoded image",
+    summary="Run Behaviour detection on a base64-encoded image",
     description=(
         "Accepts a JSON payload containing a base64-encoded image (optionally with data URL prefix). "
         "Runs YOLO object detection, saves the annotated result, and returns a URL to the output image."

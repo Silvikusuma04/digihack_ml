@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: #f5f5f5;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .camera-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        #video {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 8px;
+            background-color: #333;
+            margin-bottom: 15px;
+        }
+
+        #result-image {
+            max-width: 100%;
+            max-height: 500px;
+            border-radius: 8px;
+            margin: 20px auto;
+            display: block;
+            display: none;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #3367d6;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+
+        #status {
+            text-align: center;
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #f0f0f0;
+        }
+
+        #canvas {
+            display: none;
+        }
+
+        .result-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .camera-selector {
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        select {
+            padding: 8px 12px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Emotion Detection</h1>
+
+        <div class="camera-selector">
+            <label for="camera-select">Select Camera: </label>
+            <select id="camera-select">
+                <option value="">Auto (Environment)</option>
+            </select>
+        </div>
+
+        <div class="camera-container">
+            <video id="video" autoplay playsinline></video>
+            <div class="controls">
+                <button id="start-camera">Start Camera</button>
+                <button id="predict" disabled>Detect</button>
+                <button id="stop-camera" disabled>Stop Camera</button>
+            </div>
+            <div id="status">Camera inactive. Press "Start Camera" to begin.</div>
+        </div>
+
+        <canvas id="canvas"></canvas>
+
+        <div class="result-container">
+            <img id="result-image" alt="Detection Result">
+        </div>
+    </div>
+
+    <script>
+        let stream = null;
+        let currentCameraId = null;
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startBtn = document.getElementById('start-camera');
+        const stopBtn = document.getElementById('stop-camera');
+        const predictBtn = document.getElementById('predict');
+        const status = document.getElementById('status');
+        const resultImage = document.getElementById('result-image');
+        const cameraSelect = document.getElementById('camera-select');
+
+        // Enumerate and populate camera options
+        async function populateCameraOptions() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+                // Clear existing options except the first one
+                cameraSelect.innerHTML = '<option value="">Auto (Environment)</option>';
+
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `Camera ${index + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error('Error enumerating devices:', err);
+            }
+        }
+
+        // Initialize camera options on load
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                stream.getTracks().forEach(track => track.stop());
+                populateCameraOptions();
+            })
+            .catch(err => {
+                console.error('Error accessing camera for enumeration:', err);
+            });
+
+        async function startCamera() {
+            // Stop any existing stream
+            if (stream) {
+                stopCamera();
+            }
+
+            try {
+                const constraints = {
+                    video: currentCameraId ? { deviceId: { exact: currentCameraId } } : { facingMode: 'environment' }
+                };
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                predictBtn.disabled = false;
+                stopBtn.disabled = false;
+                startBtn.disabled = true;
+                status.innerText = 'Camera active, ready for detection.';
+            } catch (err) {
+                status.innerText = 'Failed to access camera: ' + err.message;
+                startBtn.disabled = false;
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            video.srcObject = null;
+            predictBtn.disabled = true;
+            stopBtn.disabled = true;
+            startBtn.disabled = false;
+            status.innerText = 'Camera inactive. Press "Start Camera" to begin.';
+        }
+
+        predictBtn.addEventListener('click', async () => {
+            if (!stream) return;
+        
+            // Ensure video has valid dimensions and is ready
+            if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+                status.innerText = 'Error: Cannot capture image, video not ready.';
+                return;
+            }
+        
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+            let imageData;
+            try {
+                imageData = canvas.toDataURL('image/png');
+            } catch (err) {
+                console.error('Error converting canvas to data URL:', err);
+                status.innerText = 'Error: Failed to process image.';
+                return;
+            }
+        
+            status.innerText = 'Processing...';
+        
+            try {
+                const response = await fetch('/predict_frame', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ image: imageData })
+                });
+        
+                if (!response.ok) {
+                    throw new Error('Server error: ' + response.status);
+                }
+        
+                const data = await response.json();
+                if (data.result_url) {
+                    resultImage.onload = () => {
+                        resultImage.style.display = 'block';
+                        status.innerText = 'Detection complete!';
+                    };
+                    resultImage.src = data.result_url + '?t=' + new Date().getTime();
+                }
+            } catch (error) {
+                console.error('Prediction error:', error);
+                status.innerText = 'Error: ' + error.message;
+            } finally {
+                // Re-enable button if needed (it's already enabled, but safe to keep)
+                predictBtn.disabled = false;
+            }
+        });
+
+
+        startBtn.addEventListener('click', () => {
+            startBtn.disabled = true;
+            startCamera();
+        });
+
+        stopBtn.addEventListener('click', () => {
+            stopCamera();
+        });
+
+        // Handle camera selection change
+        cameraSelect.addEventListener('change', () => {
+            currentCameraId = cameraSelect.value;
+            if (stream) {
+                // Restart camera with new selection
+                stopCamera();
+                setTimeout(() => {
+                    startBtn.disabled = true;
+                    startCamera();
+                }, 300);
+            }
+        });
+    </script>
+</body>
+</html>
