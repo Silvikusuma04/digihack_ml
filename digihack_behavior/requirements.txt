@@ -1,5 +1,6 @@
-flask
+fastapi
+uvicorn[standard]
 ultralytics
 opencv-python-headless
 pillow
-werkzeug
+jinja2

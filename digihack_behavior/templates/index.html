@@ -219,23 +219,20 @@
             status.innerText = 'Camera inactive. Press "Start Camera" to begin.';
         }
 
-        // Auto-stop camera when detection is pressed
         predictBtn.addEventListener('click', async () => {
             if (!stream) return;
-
-            // --- CAPTURE THE IMAGE WHILE CAMERA IS ACTIVE ---
+        
             // Ensure video has valid dimensions and is ready
             if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-                 status.innerText = 'Error: Cannot capture image, video not ready.';
-                 return;
+                status.innerText = 'Error: Cannot capture image, video not ready.';
+                return;
             }
-
+        
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            // Convert canvas to base64 image string BEFORE stopping the camera
+        
             let imageData;
             try {
                 imageData = canvas.toDataURL('image/png');
@@ -244,44 +241,36 @@
                 status.innerText = 'Error: Failed to process image.';
                 return;
             }
-
-            // --- STOP THE CAMERA ---
-            stream.getTracks().forEach(track => track.stop());
-            stream = null;
-            video.srcObject = null; // Clear the video element's source
-
-            predictBtn.disabled = true;
+        
             status.innerText = 'Processing...';
-
-            // --- SEND THE CAPTURED IMAGE DATA ---
+        
             try {
-                // Send the pre-captured imageData to backend
                 const response = await fetch('/predict_frame', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ image: imageData }) // Use the captured imageData
+                    body: JSON.stringify({ image: imageData })
                 });
-
+        
                 if (!response.ok) {
                     throw new Error('Server error: ' + response.status);
                 }
-
+        
                 const data = await response.json();
                 if (data.result_url) {
-                    // Display the result centered
                     resultImage.onload = () => {
                         resultImage.style.display = 'block';
                         status.innerText = 'Detection complete!';
                     };
-                    resultImage.src = data.result_url + '?t=' + new Date().getTime(); // Prevent caching
+                    resultImage.src = data.result_url + '?t=' + new Date().getTime();
                 }
             } catch (error) {
                 console.error('Prediction error:', error);
                 status.innerText = 'Error: ' + error.message;
             } finally {
-                predictBtn.disabled = false; // Re-enable button after processing
+                // Re-enable button if needed (it's already enabled, but safe to keep)
+                predictBtn.disabled = false;
             }
         });
 
