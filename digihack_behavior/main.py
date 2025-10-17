@@ -26,9 +26,9 @@ os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="YOLO Object Detection API",
+    title="Behaviour Detection API",
     description=(
-        "A FastAPI service that runs YOLOv8 object detection on uploaded images or base64-encoded frames. "
+        "A FastAPI service that runs behaviour detection on uploaded images or base64-encoded frames. "
         "Supports real-time inference via `/predict_frame` endpoint."
     ),
     version="1.0.0",
@@ -96,7 +96,7 @@ def index(request: Request):
 )
 async def predict_frame(request: Request, body: FrameRequest):
     """
-    Process a base64-encoded image frame, run YOLO inference, and return the result image URL.
+    Process a base64-encoded image frame, run inference, and return the result image URL.
     """
     img_b64 = body.image
 
