@@ -23,7 +23,7 @@
             background-color: white;
             border-radius: 10px;
             padding: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
 
         h1 {
@@ -115,67 +115,71 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Behaviour Detection</h1>
+<div class="container">
+    <h1>Behaviour Detection</h1>
 
-        <div class="camera-selector">
-            <label for="camera-select">Select Camera: </label>
-            <select id="camera-select">
-                <option value="">Auto (Environment)</option>
-            </select>
-        </div>
-
-        <div class="camera-container">
-            <video id="video" autoplay playsinline></video>
-            <div class="controls">
-                <button id="start-camera">Start Camera</button>
-                <button id="predict" disabled>Detect</button>
-                <button id="stop-camera" disabled>Stop Camera</button>
-            </div>
-            <div id="status">Camera inactive. Press "Start Camera" to begin.</div>
-        </div>
-
-        <canvas id="canvas"></canvas>
-
-        <div class="result-container">
-            <img id="result-image" alt="Detection Result">
-        </div>
+    <div class="camera-selector">
+        <label for="camera-select">Select Camera: </label>
+        <select id="camera-select">
+            <option value="">Auto (Environment)</option>
+        </select>
     </div>
 
-    <script>
-        let stream = null;
-        let currentCameraId = null;
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const startBtn = document.getElementById('start-camera');
-        const stopBtn = document.getElementById('stop-camera');
-        const predictBtn = document.getElementById('predict');
-        const status = document.getElementById('status');
-        const resultImage = document.getElementById('result-image');
-        const cameraSelect = document.getElementById('camera-select');
+    <div class="camera-container">
+        <video id="video" autoplay playsinline></video>
+        <div class="controls">
+            <button id="start-camera">Start Camera</button>
+            <button id="predict" disabled>Detect</button>
+            <button id="stop-camera" disabled>Stop Camera</button>
+        </div>
+        <div id="status">Camera inactive. Press "Start Camera" to begin.</div>
+    </div>
 
-        // Enumerate and populate camera options
-        async function populateCameraOptions() {
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+    <canvas id="canvas"></canvas>
 
-                // Clear existing options except the first one
-                cameraSelect.innerHTML = '<option value="">Auto (Environment)</option>';
+    <div class="result-container">
+        <img id="result-image" alt="Detection Result">
+        <div id="detection-results" style="margin-top: 20px; text-align: left; display: none;">
+            <h3>Detections:</h3>
+            <ul id="detection-list" style="list-style: none; padding: 0;"></ul>
+        </div>
+    </div>
+</div>
 
-                videoDevices.forEach((device, index) => {
-                    const option = document.createElement('option');
-                    option.value = device.deviceId;
-                    option.textContent = device.label || `Camera ${index + 1}`;
-                    cameraSelect.appendChild(option);
-                });
-            } catch (err) {
-                console.error('Error enumerating devices:', err);
-            }
+<script>
+    let stream = null;
+    let currentCameraId = null;
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const startBtn = document.getElementById('start-camera');
+    const stopBtn = document.getElementById('stop-camera');
+    const predictBtn = document.getElementById('predict');
+    const status = document.getElementById('status');
+    const resultImage = document.getElementById('result-image');
+    const cameraSelect = document.getElementById('camera-select');
+
+    // Enumerate and populate camera options
+    async function populateCameraOptions() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+            // Clear existing options except the first one
+            cameraSelect.innerHTML = '<option value="">Auto (Environment)</option>';
+
+            videoDevices.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Camera ${index + 1}`;
+                cameraSelect.appendChild(option);
+            });
+        } catch (err) {
+            console.error('Error enumerating devices:', err);
         }
+    }
 
-        // Initialize camera options on load
-        navigator.mediaDevices.getUserMedia({ video: true })
+    // Initialize camera options on load
+    navigator.mediaDevices.getUserMedia({video: true})
             .then(stream => {
                 stream.getTracks().forEach(track => track.stop());
                 populateCameraOptions();
@@ -184,118 +188,128 @@
                 console.error('Error accessing camera for enumeration:', err);
             });
 
-        async function startCamera() {
-            // Stop any existing stream
-            if (stream) {
-                stopCamera();
-            }
-
-            try {
-                const constraints = {
-                    video: currentCameraId ? { deviceId: { exact: currentCameraId } } : { facingMode: 'environment' }
-                };
-
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
-                video.srcObject = stream;
-                predictBtn.disabled = false;
-                stopBtn.disabled = false;
-                startBtn.disabled = true;
-                status.innerText = 'Camera active, ready for detection.';
-            } catch (err) {
-                status.innerText = 'Failed to access camera: ' + err.message;
-                startBtn.disabled = false;
-            }
-        }
-
-        function stopCamera() {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-            video.srcObject = null;
-            predictBtn.disabled = true;
-            stopBtn.disabled = true;
-            startBtn.disabled = false;
-            status.innerText = 'Camera inactive. Press "Start Camera" to begin.';
-        }
-
-        predictBtn.addEventListener('click', async () => {
-            if (!stream) return;
-        
-            // Ensure video has valid dimensions and is ready
-            if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-                status.innerText = 'Error: Cannot capture image, video not ready.';
-                return;
-            }
-        
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-            let imageData;
-            try {
-                imageData = canvas.toDataURL('image/png');
-            } catch (err) {
-                console.error('Error converting canvas to data URL:', err);
-                status.innerText = 'Error: Failed to process image.';
-                return;
-            }
-        
-            status.innerText = 'Processing...';
-        
-            try {
-                const response = await fetch('/predict_frame', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ image: imageData })
-                });
-        
-                if (!response.ok) {
-                    throw new Error('Server error: ' + response.status);
-                }
-        
-                const data = await response.json();
-                if (data.result_url) {
-                    resultImage.onload = () => {
-                        resultImage.style.display = 'block';
-                        status.innerText = 'Detection complete!';
-                    };
-                    resultImage.src = data.result_url + '?t=' + new Date().getTime();
-                }
-            } catch (error) {
-                console.error('Prediction error:', error);
-                status.innerText = 'Error: ' + error.message;
-            } finally {
-                // Re-enable button if needed (it's already enabled, but safe to keep)
-                predictBtn.disabled = false;
-            }
-        });
-
-
-        startBtn.addEventListener('click', () => {
-            startBtn.disabled = true;
-            startCamera();
-        });
-
-        stopBtn.addEventListener('click', () => {
+    async function startCamera() {
+        // Stop any existing stream
+        if (stream) {
             stopCamera();
-        });
+        }
 
-        // Handle camera selection change
-        cameraSelect.addEventListener('change', () => {
-            currentCameraId = cameraSelect.value;
-            if (stream) {
-                // Restart camera with new selection
-                stopCamera();
-                setTimeout(() => {
-                    startBtn.disabled = true;
-                    startCamera();
-                }, 300);
+        try {
+            const constraints = {
+                video: currentCameraId ? {deviceId: {exact: currentCameraId}} : {facingMode: 'environment'}
+            };
+
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            predictBtn.disabled = false;
+            stopBtn.disabled = false;
+            startBtn.disabled = true;
+            status.innerText = 'Camera active, ready for detection.';
+        } catch (err) {
+            status.innerText = 'Failed to access camera: ' + err.message;
+            startBtn.disabled = false;
+        }
+    }
+
+    function stopCamera() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+        video.srcObject = null;
+        predictBtn.disabled = true;
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+        status.innerText = 'Camera inactive. Press "Start Camera" to begin.';
+    }
+
+    predictBtn.addEventListener('click', async () => {
+        if (!stream) return;
+
+        // Ensure video has valid dimensions and is ready
+        if (video.videoWidth <= 0 || video.videoHeight <= 0) {
+            status.innerText = 'Error: Cannot capture image, video not ready.';
+            return;
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        let imageData;
+        try {
+            imageData = canvas.toDataURL('image/png');
+        } catch (err) {
+            console.error('Error converting canvas to data URL:', err);
+            status.innerText = 'Error: Failed to process image.';
+            return;
+        }
+
+        status.innerText = 'Processing...';
+
+        try {
+            const response = await fetch('/predict_frame', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({image: imageData})
+            });
+
+            if (!response.ok) {
+                throw new Error('Server error: ' + response.status);
             }
-        });
-    </script>
+
+            const data = await response.json();
+            if (data.result_url) {
+                resultImage.onload = () => {
+                    resultImage.style.display = 'block';
+                    status.innerText = 'Detection complete!';
+                };
+                resultImage.src = data.result_url + '?t=' + new Date().getTime();
+
+                // Display detections
+                const detectionResults = document.getElementById('detection-results');
+                const detectionList = document.getElementById('detection-list');
+                detectionList.innerHTML = ''; // Clear previous results
+                data.detections.forEach(detection => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = `${detection.label}: ${detection.confidence.toFixed(2)}`;
+                    detectionList.appendChild(listItem);
+                });
+                detectionResults.style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Prediction error:', error);
+            status.innerText = 'Error: ' + error.message;
+        } finally {
+            predictBtn.disabled = false;
+        }
+    });
+
+
+    startBtn.addEventListener('click', () => {
+        startBtn.disabled = true;
+        startCamera();
+    });
+
+    stopBtn.addEventListener('click', () => {
+        stopCamera();
+    });
+
+    // Handle camera selection change
+    cameraSelect.addEventListener('change', () => {
+        currentCameraId = cameraSelect.value;
+        if (stream) {
+            // Restart camera with new selection
+            stopCamera();
+            setTimeout(() => {
+                startBtn.disabled = true;
+                startCamera();
+            }, 300);
+        }
+    });
+</script>
 </body>
 </html>

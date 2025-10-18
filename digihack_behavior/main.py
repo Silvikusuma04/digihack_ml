@@ -1,35 +1,35 @@
-import os
-import io
-import uuid
 import base64
-import tempfile
-from typing import Dict, Any
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+import os
+import uuid
+from tempfile import NamedTemporaryFile
+
+import cv2
+from PIL import Image
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ultralytics import YOLO
-from PIL import Image
-import cv2
 
 # Configuration
-UPLOAD_FOLDER = 'uploads'
-RESULT_FOLDER = os.path.join('static', 'results')
-ALLOWED_EXT = {'png', 'jpg', 'jpeg'}
+class Config:
+    UPLOAD_FOLDER = 'uploads'
+    RESULT_FOLDER = os.path.join('static', 'results')
+    ALLOWED_EXT = {'png', 'jpg', 'jpeg'}
+    MODEL_PATH = os.environ.get('MODEL_PATH', './best.pt')
+    DEVICE = os.environ.get('YOLO_DEVICE', 'cpu')
+    PORT = int(os.environ.get('PORT', 30018))
 
-MODEL_PATH = os.environ.get('MODEL_PATH', './best.pt')
-DEVICE = os.environ.get('YOLO_DEVICE', 'cpu')
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULT_FOLDER, exist_ok=True)
+os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(Config.RESULT_FOLDER, exist_ok=True)
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Behaviour Detection API",
     description=(
-        "A FastAPI service that runs behaviour detection on uploaded images or base64-encoded frames. "
-        "Supports real-time inference via `/predict_frame` endpoint."
+        "A FastAPI service for behaviour detection using YOLO. "
+        "Upload images or base64-encoded frames for real-time inference."
     ),
     version="1.0.0",
 )
@@ -37,31 +37,44 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# Load model once at startup
-print('Loading model from', MODEL_PATH)
-model = YOLO(MODEL_PATH)
-print('Model loaded')
+# Load YOLO model at startup
+print(f"Loading model from {Config.MODEL_PATH}")
+model = YOLO(Config.MODEL_PATH)
+print("Model loaded successfully")
 
 
 class FrameRequest(BaseModel):
     """
-    Request body for /predict_frame endpoint.
-    
+    Request body for the `/predict_frame` endpoint.
+
     Attributes:
-        image (str): Base64-encoded image string. May optionally include a data URL prefix 
-                     (e.g., `data:image/jpeg;base64,...`). The actual base64 payload will be extracted.
+        image (str): Base64-encoded image string. Can include a data URL prefix.
     """
-    image: str
+    image: str = Field(..., description="Base64-encoded image string (with or without data URL prefix).")
+
+
+class Detection(BaseModel):
+    """
+    Model for a single detection result.
+
+    Attributes:
+        label (str): Detected behaviour label.
+        confidence (float): Confidence score of the detection.
+    """
+    label: str
+    confidence: float
 
 
 class PredictionResponse(BaseModel):
     """
-    Response model for successful prediction.
-    
+    Response model for successful predictions.
+
     Attributes:
-        result_url (str): URL to the annotated result image (relative to server root).
+        result_url (str): URL to the annotated result image.
+        detections (list[Detection]): List of detected behaviours with labels and confidence scores.
     """
     result_url: str
+    detections: list[Detection]
 
 
 @app.get("/", response_class=HTMLResponse, summary="Serve frontend page")
@@ -73,11 +86,11 @@ def index(request: Request):
 
 
 @app.post(
-    '/predict_frame',
+    "/predict_frame",
     response_model=PredictionResponse,
-    summary="Run Behaviour detection on a base64-encoded image",
+    summary="Run behaviour detection on a base64-encoded image",
     description=(
-        "Accepts a JSON payload containing a base64-encoded image (optionally with data URL prefix). "
+        "Accepts a JSON payload containing a base64-encoded image. "
         "Runs YOLO object detection, saves the annotated result, and returns a URL to the output image."
     ),
     responses={
@@ -85,50 +98,66 @@ def index(request: Request):
             "description": "Successful prediction",
             "content": {
                 "application/json": {
-                    "example": {"result_url": "/static/results/abc123_pred.png"}
+                    "example": {
+                        "result_url": "/static/results/abc123_pred.png",
+                        "detections": [
+                            {"label": "Avoid_Eye_Contact", "confidence": 0.98},
+                            {"label": "Jumping", "confidence": 0.87}
+                        ]
+                    }
                 }
             }
         },
         400: {
-            "description": "Bad Request – missing or invalid image data"
+            "description": "Bad Request – missing or invalid image data",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Invalid base64 image encoding"}
+                }
+            }
         }
     }
 )
-async def predict_frame(request: Request, body: FrameRequest):
+async def predict_frame(body: FrameRequest):
     """
     Process a base64-encoded image frame, run inference, and return the result image URL.
     """
     img_b64 = body.image
 
     # Strip data URL prefix if present
-    if img_b64.startswith('data:'):
-        img_b64 = img_b64.split(',', 1)[1]
+    if img_b64.startswith("data:"):
+        img_b64 = img_b64.split(",", 1)[1]
 
     try:
         img_bytes = base64.b64decode(img_b64)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="Invalid base64 image encoding") from e
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 image encoding")
 
-    # Save to temporary file
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.png')
-    os.close(tmp_fd)
+    # Save to a temporary file
+    with NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+        tmp_file.write(img_bytes)
+        tmp_path = tmp_file.name
+
     try:
-        with open(tmp_path, 'wb') as f:
-            f.write(img_bytes)
-
         # Run YOLO inference
-        results = model.predict(source=tmp_path, device=DEVICE, save=False)
+        results = model.predict(source=tmp_path, device=Config.DEVICE, save=False)
         r = results[0]
         plotted = r.plot()
         plotted_rgb = cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB)
 
+        # Prepare detections
+        detections = [
+            Detection(label=r.names[cls_id], confidence=float(conf))
+            for cls_id, conf in zip(r.boxes.cls.cpu().numpy().astype(int), r.boxes.conf.cpu().numpy())
+        ]
+
         # Save result
         out_name = f"{uuid.uuid4().hex}_pred.png"
-        out_path = os.path.join(RESULT_FOLDER, out_name)
+        out_path = os.path.join(Config.RESULT_FOLDER, out_name)
         Image.fromarray(plotted_rgb).save(out_path)
         result_url = f"/static/results/{out_name}"
 
-        return PredictionResponse(result_url=result_url)
+        return PredictionResponse(result_url=result_url, detections=detections)
 
     finally:
         # Clean up temp file
@@ -136,7 +165,6 @@ async def predict_frame(request: Request, body: FrameRequest):
             os.remove(tmp_path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get('PORT', 30018))
-    uvicorn.run(app, host='0.0.0.0', port=port)
+    uvicorn.run(app, host="127.0.0.1", port=Config.PORT)
