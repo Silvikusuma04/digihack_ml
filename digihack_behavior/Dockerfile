@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.10-slim
 
 # Install system dependencies required for OpenCV
 RUN apt-get update && apt-get install -y \
@@ -27,5 +27,5 @@ RUN /code/venv/bin/pip install --no-cache-dir --upgrade -r /code/requirements.tx
 # Copy the rest of the application code
 COPY . /code/
 
-# Command to run the application
-CMD ["/code/venv/bin/python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "30018"]
+# Command to run the application - Use PORT environment variable
+CMD ["/code/venv/bin/python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8080}"]

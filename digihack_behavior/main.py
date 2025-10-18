@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from ultralytics import YOLO
+from typing import List, Dict, Any
 
 # Configuration
 class Config:
@@ -19,7 +20,7 @@ class Config:
     ALLOWED_EXT = {'png', 'jpg', 'jpeg'}
     MODEL_PATH = os.environ.get('MODEL_PATH', './best.pt')
     DEVICE = os.environ.get('YOLO_DEVICE', 'cpu')
-    PORT = int(os.environ.get('PORT', 30018))
+    PORT = int(os.environ.get('PORT', 8080))  # Default to 8080 for Cloud Run
 
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(Config.RESULT_FOLDER, exist_ok=True)
@@ -74,7 +75,7 @@ class PredictionResponse(BaseModel):
         detections (list[Detection]): List of detected behaviours with labels and confidence scores.
     """
     result_url: str
-    detections: list[Detection]
+    detections: List[Dict[str, Any]] = []
 
 
 @app.get("/", response_class=HTMLResponse, summary="Serve frontend page")
@@ -145,11 +146,19 @@ async def predict_frame(body: FrameRequest):
         plotted = r.plot()
         plotted_rgb = cv2.cvtColor(plotted, cv2.COLOR_BGR2RGB)
 
-        # Prepare detections
-        detections = [
-            Detection(label=r.names[cls_id], confidence=float(conf))
-            for cls_id, conf in zip(r.boxes.cls.cpu().numpy().astype(int), r.boxes.conf.cpu().numpy())
-        ]
+        # Extract detection information
+        detections = []
+        for box in r.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            confidence = float(box.conf[0])
+            class_id = int(box.cls[0])
+            class_name = r.names[class_id]
+            
+            detections.append({
+                "class": class_name,
+                "confidence": round(confidence, 3),
+                "bbox": [round(x1), round(y1), round(x2), round(y2)]
+            })
 
         # Save result
         out_name = f"{uuid.uuid4().hex}_pred.png"
@@ -167,4 +176,4 @@ async def predict_frame(body: FrameRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=Config.PORT)
+    uvicorn.run(app, host="0.0.0.0", port=Config.PORT)

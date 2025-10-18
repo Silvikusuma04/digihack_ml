@@ -112,6 +112,41 @@
             border: 1px solid #ddd;
             font-size: 14px;
         }
+
+        #video-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px 0;
+        }
+
+        #webcam {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 8px;
+            background-color: #333;
+            display: none;
+        }
+
+        #detection-results {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            color: white;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+            width: 100%;
+            max-width: 600px;
+            display: none;
+        }
+
+        .stream-controls {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -144,172 +179,21 @@
             <ul id="detection-list" style="list-style: none; padding: 0;"></ul>
         </div>
     </div>
+
+    <div class="card">
+        <h2>Real-time Video Detection</h2>
+        <div id="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <div class="stream-controls">
+                <button id="start-stream" type="button">Start Camera</button>
+                <button id="stop-stream" type="button" disabled>Stop Camera</button>
+            </div>
+            <pre id="detection-results"></pre>
+        </div>
+    </div>
 </div>
 
 <script>
     let stream = null;
     let currentCameraId = null;
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const startBtn = document.getElementById('start-camera');
-    const stopBtn = document.getElementById('stop-camera');
-    const predictBtn = document.getElementById('predict');
-    const status = document.getElementById('status');
-    const resultImage = document.getElementById('result-image');
-    const cameraSelect = document.getElementById('camera-select');
-
-    // Enumerate and populate camera options
-    async function populateCameraOptions() {
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(device => device.kind === 'videoinput');
-
-            // Clear existing options except the first one
-            cameraSelect.innerHTML = '<option value="">Auto (Environment)</option>';
-
-            videoDevices.forEach((device, index) => {
-                const option = document.createElement('option');
-                option.value = device.deviceId;
-                option.textContent = device.label || `Camera ${index + 1}`;
-                cameraSelect.appendChild(option);
-            });
-        } catch (err) {
-            console.error('Error enumerating devices:', err);
-        }
-    }
-
-    // Initialize camera options on load
-    navigator.mediaDevices.getUserMedia({video: true})
-            .then(stream => {
-                stream.getTracks().forEach(track => track.stop());
-                populateCameraOptions();
-            })
-            .catch(err => {
-                console.error('Error accessing camera for enumeration:', err);
-            });
-
-    async function startCamera() {
-        // Stop any existing stream
-        if (stream) {
-            stopCamera();
-        }
-
-        try {
-            const constraints = {
-                video: currentCameraId ? {deviceId: {exact: currentCameraId}} : {facingMode: 'environment'}
-            };
-
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-            video.srcObject = stream;
-            predictBtn.disabled = false;
-            stopBtn.disabled = false;
-            startBtn.disabled = true;
-            status.innerText = 'Camera active, ready for detection.';
-        } catch (err) {
-            status.innerText = 'Failed to access camera: ' + err.message;
-            startBtn.disabled = false;
-        }
-    }
-
-    function stopCamera() {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-            stream = null;
-        }
-        video.srcObject = null;
-        predictBtn.disabled = true;
-        stopBtn.disabled = true;
-        startBtn.disabled = false;
-        status.innerText = 'Camera inactive. Press "Start Camera" to begin.';
-    }
-
-    predictBtn.addEventListener('click', async () => {
-        if (!stream) return;
-
-        // Ensure video has valid dimensions and is ready
-        if (video.videoWidth <= 0 || video.videoHeight <= 0) {
-            status.innerText = 'Error: Cannot capture image, video not ready.';
-            return;
-        }
-
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        let imageData;
-        try {
-            imageData = canvas.toDataURL('image/png');
-        } catch (err) {
-            console.error('Error converting canvas to data URL:', err);
-            status.innerText = 'Error: Failed to process image.';
-            return;
-        }
-
-        status.innerText = 'Processing...';
-
-        try {
-            const response = await fetch('/predict_frame', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({image: imageData})
-            });
-
-            if (!response.ok) {
-                throw new Error('Server error: ' + response.status);
-            }
-
-            const data = await response.json();
-            if (data.result_url) {
-                resultImage.onload = () => {
-                    resultImage.style.display = 'block';
-                    status.innerText = 'Detection complete!';
-                };
-                resultImage.src = data.result_url + '?t=' + new Date().getTime();
-
-                // Display detections
-                const detectionResults = document.getElementById('detection-results');
-                const detectionList = document.getElementById('detection-list');
-                detectionList.innerHTML = ''; // Clear previous results
-                data.detections.forEach(detection => {
-                    const listItem = document.createElement('li');
-                    listItem.textContent = `${detection.label}: ${detection.confidence.toFixed(2)}`;
-                    detectionList.appendChild(listItem);
-                });
-                detectionResults.style.display = 'block';
-            }
-        } catch (error) {
-            console.error('Prediction error:', error);
-            status.innerText = 'Error: ' + error.message;
-        } finally {
-            predictBtn.disabled = false;
-        }
-    });
-
-
-    startBtn.addEventListener('click', () => {
-        startBtn.disabled = true;
-        startCamera();
-    });
-
-    stopBtn.addEventListener('click', () => {
-        stopCamera();
-    });
-
-    // Handle camera selection change
-    cameraSelect.addEventListener('change', () => {
-        currentCameraId = cameraSelect.value;
-        if (stream) {
-            // Restart camera with new selection
-            stopCamera();
-            setTimeout(() => {
-                startBtn.disabled = true;
-                startCamera();
-            }, 300);
-        }
-    });
-</script>
-</body>
-</html>
